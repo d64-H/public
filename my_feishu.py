@@ -5,7 +5,7 @@ from datetime import datetime
 
 # ================= 配置区 =================
 DATA_FILE = "bbs_data.json"  # 数据保存在这个本地文件里
-st.set_page_config(page_title="自由留言板", page_icon="📝", layout="wide")
+st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
 # ================= 数据管理区 =================
 def load_data():
