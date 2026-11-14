@@ -4,7 +4,6 @@ import socket
 from datetime import datetime
 
 # ================= 魔法补丁：强制绕过 DNS 解析失败 =================
-# 防止 Streamlit 云端网络抽风
 _original_getaddrinfo = socket.getaddrinfo
 def _patched_getaddrinfo(host, *args, **kwargs):
     if host == "jkexkoplexlwkslfomom.supabase.co":
@@ -17,7 +16,7 @@ socket.getaddrinfo = _patched_getaddrinfo
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
 SUPABASE_URL = "https://jkexkoplexlwkslfomom.supabase.co"
-SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKIg"
+SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -31,29 +30,51 @@ REST_URL = f"{SUPABASE_URL}/rest/v1/posts"
 def get_posts():
     try:
         res = requests.get(f"{REST_URL}?select=*&order=id.desc", headers=HEADERS)
-        return res.json() if res.status_code == 200 else []
+        if res.status_code == 200:
+            return res.json()
+        else:
+            st.error(f"读取文章失败: {res.text}")
+            return []
     except Exception as e:
-        st.error(f"读取失败: {e}")
+        st.error(f"网络请求失败: {e}")
         return []
 
 def add_post(author, title, content):
-    data = {"author": author, "title": title, "content": content, "time": datetime.now().strftime("%Y-%m-%d %H:%M"), "comments": [], "likes": 0}
-    requests.post(REST_URL, headers=HEADERS, json=data)
+    data = {
+        "author": author, 
+        "title": title, 
+        "content": content, 
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M"), 
+        "comments": [], 
+        "likes": 0
+    }
+    res = requests.post(REST_URL, headers=HEADERS, json=data)
+    if res.status_code not in [200, 201]:
+        st.error(f"❌ 数据库拒绝写入！请检查是否加了 likes 字段，或 RLS 权限是否开启。\n错误详情: {res.text}")
+        return False
+    return True
 
 def update_post(post_id, title, content):
     data = {"title": title, "content": content, "time": datetime.now().strftime("%Y-%m-%d %H:%M") + " (已编辑)"}
-    requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json=data)
+    res = requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json=data)
+    if res.status_code not in [200, 204]:
+        st.error(f"修改失败: {res.text}")
 
 def delete_post(post_id):
-    requests.delete(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS)
+    res = requests.delete(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS)
+    if res.status_code not in [200, 204]:
+        st.error(f"删除失败: {res.text}")
 
 def update_comments(post_id, comments_list):
-    requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json={"comments": comments_list})
+    res = requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json={"comments": comments_list})
+    if res.status_code not in [200, 204]:
+        st.error(f"留言失败: {res.text}")
 
-# 新增：点赞函数
 def like_post(post_id, current_likes):
     data = {"likes": current_likes + 1}
-    requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json=data)
+    res = requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json=data)
+    if res.status_code not in [200, 204]:
+        st.error(f"点赞失败: {res.text}")
 
 # ================= 界面展示区 =================
 if "current_post_id" not in st.session_state:
@@ -76,7 +97,6 @@ with st.sidebar:
     else:
         for post in posts:
             display_author = post.get('author') or "匿名"
-            # 如果文章有点赞数，顺便在侧边栏标题里展示一下
             likes_str = f" 👍{post.get('likes', 0)}" if post.get('likes', 0) > 0 else ""
             if st.button(f"📄 {post['title']} (by {display_author}){likes_str}", key=str(post['id']), use_container_width=True):
                 st.session_state.current_post_id = str(post['id'])
@@ -92,10 +112,10 @@ if st.session_state.current_post_id == "new":
         if not title or not content:
             st.warning("标题和内容不能为空哦！")
         else:
-            add_post(author.strip() if author.strip() else "匿名", title, content)
-            st.success("发布成功！文章已永久保存至云端！")
-            st.session_state.current_post_id = None
-            st.rerun()
+            if add_post(author.strip() if author.strip() else "匿名", title, content):
+                st.success("发布成功！文章已永久保存至云端！")
+                st.session_state.current_post_id = None
+                st.rerun()
 
 elif st.session_state.current_post_id is not None:
     post_id = int(st.session_state.current_post_id)
