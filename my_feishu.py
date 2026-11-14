@@ -1,22 +1,13 @@
 import streamlit as st
 import requests
-import socket
 from datetime import datetime
-
-# ================= 魔法补丁：强制绕过 DNS 解析失败 =================
-_original_getaddrinfo = socket.getaddrinfo
-def _patched_getaddrinfo(host, *args, **kwargs):
-    if host == "jkexkoplexlwkslfomom.supabase.co":
-        return _original_getaddrinfo("104.18.38.56", *args, **kwargs)
-    return _original_getaddrinfo(host, *args, **kwargs)
-socket.getaddrinfo = _patched_getaddrinfo
-# ====================================================================
 
 # ================= 配置区 =================
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
+# 确保这里没有任何多余的空格或后缀
 SUPABASE_URL = "https://jkexkoplexlwkslfomom.supabase.co"
-SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
+SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKIg"
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -33,10 +24,10 @@ def get_posts():
         if res.status_code == 200:
             return res.json()
         else:
-            st.error(f"读取文章失败: {res.text}")
+            st.error(f"读取文章失败 (状态码 {res.status_code}): {res.text}")
             return []
     except Exception as e:
-        st.error(f"网络请求失败: {e}")
+        st.error(f"网络请求异常: {e}")
         return []
 
 def add_post(author, title, content):
@@ -50,7 +41,7 @@ def add_post(author, title, content):
     }
     res = requests.post(REST_URL, headers=HEADERS, json=data)
     if res.status_code not in [200, 201]:
-        st.error(f"❌ 数据库拒绝写入！请检查是否加了 likes 字段，或 RLS 权限是否开启。\n错误详情: {res.text}")
+        st.error(f"❌ 数据库拒绝写入！错误详情: {res.text}")
         return False
     return True
 
@@ -143,7 +134,6 @@ elif st.session_state.current_post_id is not None:
                 st.button("❤️ 已赞", disabled=True, use_container_width=True)
         with col_count:
             st.write(f"<div style='padding-top: 8px; color: gray;'>已有 {current_likes} 人点赞</div>", unsafe_allow_html=True)
-        # ============================================
         
         # 文章管理面板
         with st.expander("⚙️ 管理当前文章 (修改/撤回)"):
@@ -197,4 +187,4 @@ elif st.session_state.current_post_id is not None:
 
 elif st.session_state.current_post_id is None:
     st.title("👋 欢迎来到稚荷")
-    st.info("这里是一个开放的树洞。你可以随意发表文章，也可以匿名留言。点击左侧开始吧！")
+    st.info("这里是一个开放的树洞。你的文章和留言均已永久保存在云端，再也不会丢失。")
