@@ -7,7 +7,7 @@ st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
 # 确保这里没有任何多余的空格或后缀
 SUPABASE_URL = "https://jkexkoplexlwkslfomom.supabase.co"
-SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKIg"
+SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
