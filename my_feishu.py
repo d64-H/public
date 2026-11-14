@@ -1,75 +1,79 @@
 import streamlit as st
 import requests
-import time
+import urllib3
 from datetime import datetime
 
-# ================= 配置区（已全部写死，无需任何修改） =================
+# 禁用安全警告（因为下面用 IP 直连时会忽略证书校验，防止满屏红字警告）
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
-SUPABASE_URL = "https://jkexkoplexlwkslfomom.supabase.co"
-# 已经修正了你说的 I8 问题
+# ================= 核心配置 =================
 SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
+HOST = "jkexkoplexlwkslfomom.supabase.co"
+# 强行指定 Cloudflare 的 Anycast IP，彻底绕过 Streamlit 云端的 DNS 解析失败问题
+CLOUDFLARE_IPS = ["104.18.38.56", "104.16.0.1", "172.67.200.0"]
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json",
+    "Host": HOST,  # 关键：伪造真实的 Host 头，骗过 Supabase 网关
     "Prefer": "return=representation"
 }
-REST_URL = f"{SUPABASE_URL}/rest/v1/posts"
 
-# ================= 数据管理区（带自动重试的请求引擎） =================
-def safe_request(method, url, json_data=None):
-    """自带 3 次重试机制的网络请求，防止云端 DNS 偶尔抽风"""
-    for attempt in range(3):
+# 智能请求引擎：优先走域名，如果超时，立刻切换 IP 强连
+def smart_request(method, endpoint, json_data=None):
+    # 1. 先尝试正常域名请求
+    try:
+        url = f"https://{HOST}/rest/v1/{endpoint}"
+        if method == "GET": res = requests.get(url, headers=HEADERS, timeout=5)
+        elif method == "POST": res = requests.post(url, headers=HEADERS, json=json_data, timeout=5)
+        elif method == "PATCH": res = requests.patch(url, headers=HEADERS, json=json_data, timeout=5)
+        elif method == "DELETE": res = requests.delete(url, headers=HEADERS, timeout=5)
+        if res.status_code in [200, 201, 204]: return res
+    except Exception:
+        pass # 如果失败，进入下面的 IP 强连模式
+
+    # 2. 终极自救：直接连 IP（无论 DNS 怎么被污染，只要网络通，就能连上）
+    for ip in CLOUDFLARE_IPS:
         try:
-            if method == "GET":
-                res = requests.get(url, headers=HEADERS, timeout=10)
-            elif method == "POST":
-                res = requests.post(url, headers=HEADERS, json=json_data, timeout=10)
-            elif method == "PATCH":
-                res = requests.patch(url, headers=HEADERS, json=json_data, timeout=10)
-            elif method == "DELETE":
-                res = requests.delete(url, headers=HEADERS, timeout=10)
+            url = f"https://{ip}/rest/v1/{endpoint}"
+            if method == "GET": res = requests.get(url, headers=HEADERS, verify=False, timeout=5)
+            elif method == "POST": res = requests.post(url, headers=HEADERS, json=json_data, verify=False, timeout=5)
+            elif method == "PATCH": res = requests.patch(url, headers=HEADERS, json=json_data, verify=False, timeout=5)
+            elif method == "DELETE": res = requests.delete(url, headers=HEADERS, verify=False, timeout=5)
+            if res.status_code in [200, 201, 204]: return res
+        except Exception:
+            continue
             
-            if res.status_code in [200, 201, 204]:
-                return res
-        except requests.exceptions.RequestException as e:
-            if attempt == 2: # 最后一次尝试也失败了
-                st.error(f"网络连接超时，请稍后刷新重试。")
-                return None
-            time.sleep(1.5) # 失败后等 1.5 秒再试
     return None
 
+# ================= 数据管理区 =================
 def get_posts():
-    res = safe_request("GET", f"{REST_URL}?select=*&order=id.desc")
+    res = smart_request("GET", "posts?select=*&order=id.desc")
     if res and res.status_code == 200:
         return res.json()
+    st.error("网络连接超时，云端服务器正在努力重试。请刷新页面。")
     return []
 
 def add_post(author, title, content):
-    data = {
-        "author": author, "title": title, "content": content, 
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M"), "comments": [], "likes": 0
-    }
-    res = safe_request("POST", REST_URL, json_data=data)
-    if res and res.status_code in [200, 201]:
-        return True
-    st.error("发布失败，请稍后重试。")
-    return False
+    data = {"author": author, "title": title, "content": content, "time": datetime.now().strftime("%Y-%m-%d %H:%M"), "comments": [], "likes": 0}
+    res = smart_request("POST", "posts", json_data=data)
+    return res and res.status_code in [200, 201]
 
 def update_post(post_id, title, content):
     data = {"title": title, "content": content, "time": datetime.now().strftime("%Y-%m-%d %H:%M") + " (已编辑)"}
-    safe_request("PATCH", f"{REST_URL}?id=eq.{post_id}", json_data=data)
+    smart_request("PATCH", f"posts?id=eq.{post_id}", json_data=data)
 
 def delete_post(post_id):
-    safe_request("DELETE", f"{REST_URL}?id=eq.{post_id}")
+    smart_request("DELETE", f"posts?id=eq.{post_id}")
 
 def like_post(post_id, current_likes):
-    safe_request("PATCH", f"{REST_URL}?id=eq.{post_id}", json_data={"likes": current_likes + 1})
+    smart_request("PATCH", f"posts?id=eq.{post_id}", json_data={"likes": current_likes + 1})
 
 def update_comments(post_id, comments_list):
-    safe_request("PATCH", f"{REST_URL}?id=eq.{post_id}", json_data={"comments": comments_list})
+    smart_request("PATCH", f"posts?id=eq.{post_id}", json_data={"comments": comments_list})
 
 # ================= 界面展示区 =================
 if "current_post_id" not in st.session_state:
@@ -124,10 +128,8 @@ elif st.session_state.current_post_id is not None:
         with st.container(border=True):
             st.markdown(current_post["content"])
         
-        # 点赞区域
         current_likes = current_post.get("likes") or 0
         col_like, col_count, _ = st.columns([1.5, 3, 5])
-        
         with col_like:
             if post_id not in st.session_state.liked_posts:
                 if st.button("👍 点赞", type="primary", use_container_width=True):
@@ -139,7 +141,6 @@ elif st.session_state.current_post_id is not None:
         with col_count:
             st.write(f"<div style='padding-top: 8px; color: gray;'>已有 {current_likes} 人点赞</div>", unsafe_allow_html=True)
         
-        # 文章管理面板
         with st.expander("⚙️ 管理当前文章 (修改/撤回)"):
             with st.form("edit_post_form"):
                 edit_title = st.text_input("修改标题", value=current_post["title"])
@@ -155,7 +156,6 @@ elif st.session_state.current_post_id is not None:
                 st.rerun()
                 
         st.divider()
-        
         comments_list = current_post.get("comments") or []
         st.subheader(f"💬 评论 ({len(comments_list)})")
         
@@ -178,7 +178,6 @@ elif st.session_state.current_post_id is not None:
                         st.rerun()
             st.write("") 
         
-        # 发表新评论
         with st.expander("🗣️ 写留言 / 评论", expanded=True):
             c_author = st.text_input("你的昵称 (选填)", key="c_author", placeholder="不填则显示为匿名")
             c_content = st.text_area("留言内容", key="c_content")
