@@ -1,27 +1,28 @@
 import streamlit as st
+import supadns  # 引入专门解决 DNS 问题的库
 from supabase import create_client, Client
 from datetime import datetime
+
+# 强制应用 DNS 补丁，绕过解析失败的问题
+supadns.patch()
 
 # ================= 配置区 =================
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
-# 连接 Supabase 云端永久数据库（带绝对防御）
+# 连接 Supabase 云端永久数据库 (带绝对防御)
 @st.cache_resource
 def init_connection():
     try:
-        # 优先尝试从 Streamlit Secrets 读取
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
         return create_client(url, key)
     except Exception:
-        # 终极兜底：就算 Secrets 格式错了，也强制用下面的写死的密钥连接
+        # 兜底：强制用你写死的密钥
         url = "https://jkexkoplexlwkslfomom.supabase.co"
         key = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
         return create_client(url, key)
 
-# ⚠️ 就是这句！必须有，而且必须顶格写，不能缩进！
 supabase = init_connection()
-
 # ================= 数据管理区 =================
 def get_posts():
     if supabase is None:
