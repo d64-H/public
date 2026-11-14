@@ -1,24 +1,26 @@
 import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime
+
 # ================= 配置区 =================
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
-# 连接 Supabase 云端永久数据库 (带绝对防御)
+# 连接 Supabase 云端永久数据库
 @st.cache_resource
 def init_connection():
     try:
+        # 从 Secrets 读取
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
         return create_client(url, key)
-    except Exception:
-        # 兜底：强制用你写死的密钥
+    except Exception as e:
+        st.error(f"读取配置失败，请检查 Secrets 格式: {e}")
+        # 兜底：如果 Secrets 因为换行读不到，强行用写死的
         url = "https://jkexkoplexlwkslfomom.supabase.co"
-        key = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
+        key = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKIg"
         return create_client(url, key)
 
-supabase = init_connection()
-# ================= 数据管理区 =================
+supabase = init_connection()# ================= 数据管理区 =================
 def get_posts():
     if supabase is None:
         return []
