@@ -1,34 +1,39 @@
 import streamlit as st
-import requests
-import json
+import psycopg2
+from supabase import create_client, Client
 from datetime import datetime
 
-# ================= 核心配置（直接写死，不搞花里胡哨的） =================
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
+# ================= 核心配置区（直接写死） =================
 SUPABASE_URL = "https://jkexkoplexlwkslfomom.supabase.co"
 SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
+# ⚠️ 把下面的中文换成你真实的数据库密码，不要带方括号！
+SUPABASE_DB_URL = "postgresql://postgres.jkexkoplexlwkslfomom:你的真实数据库密码@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
 
-# 构造请求头
-HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json",
-    "Prefer": "return=representation"
-}
-
-REST_URL = f"{SUPABASE_URL}/rest/v1/posts"
-
-# ================= 数据管理区（用 requests 直连） =================
-def get_posts():
+@st.cache_resource
+def init_connection():
     try:
-        # 按照 id 倒序拉取数据
-        res = requests.get(f"{REST_URL}?select=*&order=id.desc", headers=HEADERS)
-        if res.status_code == 200:
-            return res.json()
-        return []
+        # 用 psycopg2 建立底层连接，绕过 DNS 污染
+        conn = psycopg2.connect(SUPABASE_DB_URL)
+        # 建立 API 客户端，用于增删改查
+        client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        return client, conn
     except Exception as e:
-        st.error(f"读取失败: {e}")
+        st.error(f"数据库连接失败: {e}")
+        return None, None
+
+supabase, db_conn = init_connection()
+
+# ================= 数据管理区（统一使用 supabase-py 的标准方法） =================
+def get_posts():
+    if supabase is None:
+        return []
+    try:
+        res = supabase.table("posts").select("*").order("id", desc=True).execute()
+        return res.data
+    except Exception as e:
+        st.error(f"读取文章失败，请检查数据库: {e}")
         return []
 
 def add_post(author, title, content):
@@ -39,7 +44,7 @@ def add_post(author, title, content):
         "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "comments": []
     }
-    requests.post(REST_URL, headers=HEADERS, json=data)
+    supabase.table("posts").insert(data).execute()
 
 def update_post(post_id, title, content):
     data = {
@@ -47,13 +52,13 @@ def update_post(post_id, title, content):
         "content": content,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M") + " (已编辑)"
     }
-    requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json=data)
+    supabase.table("posts").update(data).eq("id", post_id).execute()
 
 def delete_post(post_id):
-    requests.delete(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS)
+    supabase.table("posts").delete().eq("id", post_id).execute()
 
 def update_comments(post_id, comments_list):
-    requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json={"comments": comments_list})
+    supabase.table("posts").update({"comments": comments_list}).eq("id", post_id).execute()
 
 # ================= 界面展示区 =================
 if "current_post_id" not in st.session_state:
