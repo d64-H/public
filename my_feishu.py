@@ -21,7 +21,9 @@ def init_connection():
         st.error(f"连接失败: {e}")
         return None, None
 
-supabase, db_conn = init_connection()================= 数据管理区 =================
+supabase, db_conn = init_connection()
+
+# ================= 数据管理区 =================
 def get_posts():
     if supabase is None:
         return []
