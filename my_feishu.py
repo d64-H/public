@@ -1,80 +1,97 @@
-import supadns
-supadns.patch()  # 强制开启防 DNS 污染模式
-
 import streamlit as st
-import requests
-from datetime import datetime
-# ... 下面保持原样 ...
-import supadns
-supadns.patch() 
-import streamlit as st
-import requests
+import psycopg2
+from psycopg2.extras import RealDictCursor, Json
 from datetime import datetime
 
 # ================= 配置区 =================
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
-# 确保这里没有任何多余的空格或后缀
-SUPABASE_URL = "https://jkexkoplexlwkslfomom.supabase.co"
-SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
+# ⚠️ 把下面这行里的 [填你的密码] 换成你真实的数据库密码！
+# 千万不要带中括号，密码直接连着冒号和@
+SUPABASE_DB_URL = "postgresql://postgres.jkexkoplexlwkslfomom:6KCGdxL608z6m9WX@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres"
 
-HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json",
-    "Prefer": "return=representation"
-}
-REST_URL = f"{SUPABASE_URL}/rest/v1/posts"
+@st.cache_resource
+def init_connection():
+    try:
+        # 使用 psycopg2 直接连底层数据库，完美绕过 DNS 解析失败问题
+        conn = psycopg2.connect(SUPABASE_DB_URL)
+        return conn
+    except Exception as e:
+        st.error(f"❌ 数据库连接失败，请检查密码是否填写正确。报错详情: {e}")
+        return None
+
+db_conn = init_connection()
 
 # ================= 数据管理区 =================
 def get_posts():
+    if db_conn is None:
+        return []
     try:
-        res = requests.get(f"{REST_URL}?select=*&order=id.desc", headers=HEADERS)
-        if res.status_code == 200:
-            return res.json()
-        else:
-            st.error(f"读取文章失败 (状态码 {res.status_code}): {res.text}")
-            return []
+        with db_conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM posts ORDER BY id DESC")
+            return cur.fetchall()
     except Exception as e:
-        st.error(f"网络请求异常: {e}")
+        db_conn.rollback()
+        st.error(f"读取文章失败: {e}")
         return []
 
 def add_post(author, title, content):
-    data = {
-        "author": author, 
-        "title": title, 
-        "content": content, 
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M"), 
-        "comments": [], 
-        "likes": 0
-    }
-    res = requests.post(REST_URL, headers=HEADERS, json=data)
-    if res.status_code not in [200, 201]:
-        st.error(f"❌ 数据库拒绝写入！错误详情: {res.text}")
+    if db_conn is None: return False
+    try:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO posts (author, title, content, time, comments, likes) VALUES (%s, %s, %s, %s, %s, %s)",
+                (author, title, content, datetime.now().strftime("%Y-%m-%d %H:%M"), Json([]), 0)
+            )
+            db_conn.commit()
+        return True
+    except Exception as e:
+        db_conn.rollback()
+        st.error(f"发布失败: {e}")
         return False
-    return True
 
 def update_post(post_id, title, content):
-    data = {"title": title, "content": content, "time": datetime.now().strftime("%Y-%m-%d %H:%M") + " (已编辑)"}
-    res = requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json=data)
-    if res.status_code not in [200, 204]:
-        st.error(f"修改失败: {res.text}")
+    if db_conn is None: return
+    try:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE posts SET title = %s, content = %s, time = %s WHERE id = %s",
+                (title, content, datetime.now().strftime("%Y-%m-%d %H:%M") + " (已编辑)", post_id)
+            )
+            db_conn.commit()
+    except Exception as e:
+        db_conn.rollback()
+        st.error(f"修改失败: {e}")
 
 def delete_post(post_id):
-    res = requests.delete(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS)
-    if res.status_code not in [200, 204]:
-        st.error(f"删除失败: {res.text}")
-
-def update_comments(post_id, comments_list):
-    res = requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json={"comments": comments_list})
-    if res.status_code not in [200, 204]:
-        st.error(f"留言失败: {res.text}")
+    if db_conn is None: return
+    try:
+        with db_conn.cursor() as cur:
+            cur.execute("DELETE FROM posts WHERE id = %s", (post_id,))
+            db_conn.commit()
+    except Exception as e:
+        db_conn.rollback()
+        st.error(f"删除失败: {e}")
 
 def like_post(post_id, current_likes):
-    data = {"likes": current_likes + 1}
-    res = requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json=data)
-    if res.status_code not in [200, 204]:
-        st.error(f"点赞失败: {res.text}")
+    if db_conn is None: return
+    try:
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE posts SET likes = %s WHERE id = %s", (current_likes + 1, post_id))
+            db_conn.commit()
+    except Exception as e:
+        db_conn.rollback()
+        st.error(f"点赞失败: {e}")
+
+def update_comments(post_id, comments_list):
+    if db_conn is None: return
+    try:
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE posts SET comments = %s WHERE id = %s", (Json(comments_list), post_id))
+            db_conn.commit()
+    except Exception as e:
+        db_conn.rollback()
+        st.error(f"留言保存失败: {e}")
 
 # ================= 界面展示区 =================
 if "current_post_id" not in st.session_state:
@@ -160,9 +177,15 @@ elif st.session_state.current_post_id is not None:
                 st.rerun()
                 
         st.divider()
-        st.subheader(f"💬 评论 ({len(current_post['comments'])})")
         
-        for i, c in enumerate(current_post["comments"]):
+        # 评论列表部分（兼容可能没有 comments 字段的情况）
+        comments_list = current_post.get("comments")
+        if comments_list is None:
+            comments_list = []
+            
+        st.subheader(f"💬 评论 ({len(comments_list)})")
+        
+        for i, c in enumerate(comments_list):
             col_content, col_manage = st.columns([8, 2])
             with col_content:
                 st.markdown(f"**{c['author']}** 回复于 {c['time']}：\n> {c['content']}")
@@ -173,11 +196,11 @@ elif st.session_state.current_post_id is not None:
                         if st.form_submit_button("保存修改"):
                             c["content"] = new_c_content
                             c["time"] = datetime.now().strftime("%Y-%m-%d %H:%M") + " (已编辑)"
-                            update_comments(post_id, current_post["comments"])
+                            update_comments(post_id, comments_list)
                             st.rerun()
                     if st.button("🗑️ 撤回", key=f"del_c_{i}"):
-                        current_post["comments"].pop(i)
-                        update_comments(post_id, current_post["comments"])
+                        comments_list.pop(i)
+                        update_comments(post_id, comments_list)
                         st.rerun()
             st.write("") 
         
@@ -188,8 +211,8 @@ elif st.session_state.current_post_id is not None:
             if st.button("发送留言"):
                 if c_content.strip():
                     new_comment = {"author": c_author.strip() if c_author.strip() else "匿名", "content": c_content, "time": datetime.now().strftime("%Y-%m-%d %H:%M")}
-                    current_post["comments"].append(new_comment)
-                    update_comments(post_id, current_post["comments"])
+                    comments_list.append(new_comment)
+                    update_comments(post_id, comments_list)
                     st.rerun()
                 else:
                     st.warning("留言内容不能为空！")

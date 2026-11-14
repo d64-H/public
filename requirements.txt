@@ -1,2 +1,2 @@
-requests
-supadns
+streamlit
+psycopg2-binary
