@@ -1,97 +1,75 @@
 import streamlit as st
-import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+import requests
+import time
 from datetime import datetime
 
-# ================= 配置区 =================
+# ================= 配置区（已全部写死，无需任何修改） =================
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
-# ⚠️ 把下面这行里的 [填你的密码] 换成你真实的数据库密码！
-# 千万不要带中括号，密码直接连着冒号和@
-SUPABASE_DB_URL = "postgresql://postgres.jkexkoplexlwkslfomom:6KCGdxL608z6m9WX@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres"
+SUPABASE_URL = "https://jkexkoplexlwkslfomom.supabase.co"
+# 已经修正了你说的 I8 问题
+SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
 
-@st.cache_resource
-def init_connection():
-    try:
-        # 使用 psycopg2 直接连底层数据库，完美绕过 DNS 解析失败问题
-        conn = psycopg2.connect(SUPABASE_DB_URL)
-        return conn
-    except Exception as e:
-        st.error(f"❌ 数据库连接失败，请检查密码是否填写正确。报错详情: {e}")
-        return None
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    "Prefer": "return=representation"
+}
+REST_URL = f"{SUPABASE_URL}/rest/v1/posts"
 
-db_conn = init_connection()
+# ================= 数据管理区（带自动重试的请求引擎） =================
+def safe_request(method, url, json_data=None):
+    """自带 3 次重试机制的网络请求，防止云端 DNS 偶尔抽风"""
+    for attempt in range(3):
+        try:
+            if method == "GET":
+                res = requests.get(url, headers=HEADERS, timeout=10)
+            elif method == "POST":
+                res = requests.post(url, headers=HEADERS, json=json_data, timeout=10)
+            elif method == "PATCH":
+                res = requests.patch(url, headers=HEADERS, json=json_data, timeout=10)
+            elif method == "DELETE":
+                res = requests.delete(url, headers=HEADERS, timeout=10)
+            
+            if res.status_code in [200, 201, 204]:
+                return res
+        except requests.exceptions.RequestException as e:
+            if attempt == 2: # 最后一次尝试也失败了
+                st.error(f"网络连接超时，请稍后刷新重试。")
+                return None
+            time.sleep(1.5) # 失败后等 1.5 秒再试
+    return None
 
-# ================= 数据管理区 =================
 def get_posts():
-    if db_conn is None:
-        return []
-    try:
-        with db_conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT * FROM posts ORDER BY id DESC")
-            return cur.fetchall()
-    except Exception as e:
-        db_conn.rollback()
-        st.error(f"读取文章失败: {e}")
-        return []
+    res = safe_request("GET", f"{REST_URL}?select=*&order=id.desc")
+    if res and res.status_code == 200:
+        return res.json()
+    return []
 
 def add_post(author, title, content):
-    if db_conn is None: return False
-    try:
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO posts (author, title, content, time, comments, likes) VALUES (%s, %s, %s, %s, %s, %s)",
-                (author, title, content, datetime.now().strftime("%Y-%m-%d %H:%M"), Json([]), 0)
-            )
-            db_conn.commit()
+    data = {
+        "author": author, "title": title, "content": content, 
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M"), "comments": [], "likes": 0
+    }
+    res = safe_request("POST", REST_URL, json_data=data)
+    if res and res.status_code in [200, 201]:
         return True
-    except Exception as e:
-        db_conn.rollback()
-        st.error(f"发布失败: {e}")
-        return False
+    st.error("发布失败，请稍后重试。")
+    return False
 
 def update_post(post_id, title, content):
-    if db_conn is None: return
-    try:
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE posts SET title = %s, content = %s, time = %s WHERE id = %s",
-                (title, content, datetime.now().strftime("%Y-%m-%d %H:%M") + " (已编辑)", post_id)
-            )
-            db_conn.commit()
-    except Exception as e:
-        db_conn.rollback()
-        st.error(f"修改失败: {e}")
+    data = {"title": title, "content": content, "time": datetime.now().strftime("%Y-%m-%d %H:%M") + " (已编辑)"}
+    safe_request("PATCH", f"{REST_URL}?id=eq.{post_id}", json_data=data)
 
 def delete_post(post_id):
-    if db_conn is None: return
-    try:
-        with db_conn.cursor() as cur:
-            cur.execute("DELETE FROM posts WHERE id = %s", (post_id,))
-            db_conn.commit()
-    except Exception as e:
-        db_conn.rollback()
-        st.error(f"删除失败: {e}")
+    safe_request("DELETE", f"{REST_URL}?id=eq.{post_id}")
 
 def like_post(post_id, current_likes):
-    if db_conn is None: return
-    try:
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE posts SET likes = %s WHERE id = %s", (current_likes + 1, post_id))
-            db_conn.commit()
-    except Exception as e:
-        db_conn.rollback()
-        st.error(f"点赞失败: {e}")
+    safe_request("PATCH", f"{REST_URL}?id=eq.{post_id}", json_data={"likes": current_likes + 1})
 
 def update_comments(post_id, comments_list):
-    if db_conn is None: return
-    try:
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE posts SET comments = %s WHERE id = %s", (Json(comments_list), post_id))
-            db_conn.commit()
-    except Exception as e:
-        db_conn.rollback()
-        st.error(f"留言保存失败: {e}")
+    safe_request("PATCH", f"{REST_URL}?id=eq.{post_id}", json_data={"comments": comments_list})
 
 # ================= 界面展示区 =================
 if "current_post_id" not in st.session_state:
@@ -146,7 +124,7 @@ elif st.session_state.current_post_id is not None:
         with st.container(border=True):
             st.markdown(current_post["content"])
         
-        # ================= 点赞区域 =================
+        # 点赞区域
         current_likes = current_post.get("likes") or 0
         col_like, col_count, _ = st.columns([1.5, 3, 5])
         
@@ -178,11 +156,7 @@ elif st.session_state.current_post_id is not None:
                 
         st.divider()
         
-        # 评论列表部分（兼容可能没有 comments 字段的情况）
-        comments_list = current_post.get("comments")
-        if comments_list is None:
-            comments_list = []
-            
+        comments_list = current_post.get("comments") or []
         st.subheader(f"💬 评论 ({len(comments_list)})")
         
         for i, c in enumerate(comments_list):
