@@ -1,37 +1,34 @@
 import streamlit as st
-import psycopg2
-from supabase import create_client, Client
+import requests
+import json
 from datetime import datetime
 
+# ================= 核心配置（直接写死，不搞花里胡哨的） =================
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
-@st.cache_resource
-def init_connection():
-    try:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        db_url = st.secrets.get("SUPABASE_DB_URL")
-        
-        # 使用 psycopg2 绕过 API 的 DNS 解析问题
-        if db_url:
-            conn = psycopg2.connect(db_url)
-            return create_client(url, key), conn
-        return create_client(url, key), None
-    except Exception as e:
-        st.error(f"连接失败: {e}")
-        return None, None
+SUPABASE_URL = "https://jkexkoplexlwkslfomom.supabase.co"
+SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
 
-supabase, db_conn = init_connection()
+# 构造请求头
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    "Prefer": "return=representation"
+}
 
-# ================= 数据管理区 =================
+REST_URL = f"{SUPABASE_URL}/rest/v1/posts"
+
+# ================= 数据管理区（用 requests 直连） =================
 def get_posts():
-    if supabase is None:
-        return []
     try:
-        res = supabase.table("posts").select("*").order("id", desc=True).execute()
-        return res.data
+        # 按照 id 倒序拉取数据
+        res = requests.get(f"{REST_URL}?select=*&order=id.desc", headers=HEADERS)
+        if res.status_code == 200:
+            return res.json()
+        return []
     except Exception as e:
-        st.error(f"读取文章失败，请检查数据库: {e}")
+        st.error(f"读取失败: {e}")
         return []
 
 def add_post(author, title, content):
@@ -42,7 +39,7 @@ def add_post(author, title, content):
         "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "comments": []
     }
-    supabase.table("posts").insert(data).execute()
+    requests.post(REST_URL, headers=HEADERS, json=data)
 
 def update_post(post_id, title, content):
     data = {
@@ -50,19 +47,18 @@ def update_post(post_id, title, content):
         "content": content,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M") + " (已编辑)"
     }
-    supabase.table("posts").update(data).eq("id", post_id).execute()
+    requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json=data)
 
 def delete_post(post_id):
-    supabase.table("posts").delete().eq("id", post_id).execute()
+    requests.delete(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS)
 
 def update_comments(post_id, comments_list):
-    supabase.table("posts").update({"comments": comments_list}).eq("id", post_id).execute()
+    requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json={"comments": comments_list})
 
-# 初始化 session_state
+# ================= 界面展示区 =================
 if "current_post_id" not in st.session_state:
     st.session_state.current_post_id = None
 
-# ================= 侧边栏 (文章列表) =================
 with st.sidebar:
     st.title("🏠 稚荷")
     if st.button("➕ 写一篇新文章", use_container_width=True, type="primary"):
@@ -77,12 +73,11 @@ with st.sidebar:
         st.info("还没有文章，快来发第一篇吧！")
     else:
         for post in posts:
-            display_author = post['author'] if post['author'] else "匿名"
+            display_author = post.get('author') or "匿名"
             if st.button(f"📄 {post['title']} (by {display_author})", key=str(post['id']), use_container_width=True):
                 st.session_state.current_post_id = str(post['id'])
                 st.rerun()
 
-# ================= 主界面 =================
 if st.session_state.current_post_id == "new":
     st.title("✍️ 写新文章")
     author = st.text_input("你的昵称 (选填)", placeholder="不填则显示为匿名")
@@ -104,13 +99,12 @@ elif st.session_state.current_post_id is not None:
     
     if current_post:
         st.title(current_post["title"])
-        st.caption(f"作者：{current_post['author']} | 发布于：{current_post['time']}")
+        st.caption(f"作者：{current_post.get('author')} | 发布于：{current_post.get('time')}")
         st.divider()
         
         with st.container(border=True):
             st.markdown(current_post["content"])
         
-        # 文章管理面板
         with st.expander("⚙️ 管理当前文章 (修改/撤回)"):
             with st.form("edit_post_form"):
                 edit_title = st.text_input("修改标题", value=current_post["title"])
@@ -147,7 +141,6 @@ elif st.session_state.current_post_id is not None:
                         st.rerun()
             st.write("") 
         
-        # 发表新评论
         with st.expander("🗣️ 写留言 / 评论", expanded=True):
             c_author = st.text_input("你的昵称 (选填)", key="c_author", placeholder="不填则显示为匿名")
             c_content = st.text_area("留言内容", key="c_content")
@@ -166,4 +159,4 @@ elif st.session_state.current_post_id is not None:
 
 elif st.session_state.current_post_id is None:
     st.title("👋 欢迎来到稚荷")
-    st.info("这里是一个开放的树洞。你可以随意发表文章，也可以匿名留言。点击左侧开始吧！")
+    st.info("这里是一个开放的树洞。你的文章和留言均已永久保存在云端，再也不会丢失。")
