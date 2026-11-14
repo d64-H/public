@@ -4,11 +4,10 @@ import socket
 from datetime import datetime
 
 # ================= 魔法补丁：强制绕过 DNS 解析失败 =================
-# 因为 Streamlit 云端 DNS 偶尔抽风，这里直接强行把域名指向 Cloudflare 的真实 IP
+# 防止 Streamlit 云端网络抽风
 _original_getaddrinfo = socket.getaddrinfo
 def _patched_getaddrinfo(host, *args, **kwargs):
     if host == "jkexkoplexlwkslfomom.supabase.co":
-        # 104.18.38.56 是 Supabase 所在的真实 IP
         return _original_getaddrinfo("104.18.38.56", *args, **kwargs)
     return _original_getaddrinfo(host, *args, **kwargs)
 socket.getaddrinfo = _patched_getaddrinfo
@@ -18,7 +17,7 @@ socket.getaddrinfo = _patched_getaddrinfo
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
 SUPABASE_URL = "https://jkexkoplexlwkslfomom.supabase.co"
-SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
+SUPABASE_KEY = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKIg"
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -38,7 +37,7 @@ def get_posts():
         return []
 
 def add_post(author, title, content):
-    data = {"author": author, "title": title, "content": content, "time": datetime.now().strftime("%Y-%m-%d %H:%M"), "comments": []}
+    data = {"author": author, "title": title, "content": content, "time": datetime.now().strftime("%Y-%m-%d %H:%M"), "comments": [], "likes": 0}
     requests.post(REST_URL, headers=HEADERS, json=data)
 
 def update_post(post_id, title, content):
@@ -51,9 +50,16 @@ def delete_post(post_id):
 def update_comments(post_id, comments_list):
     requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json={"comments": comments_list})
 
+# 新增：点赞函数
+def like_post(post_id, current_likes):
+    data = {"likes": current_likes + 1}
+    requests.patch(f"{REST_URL}?id=eq.{post_id}", headers=HEADERS, json=data)
+
 # ================= 界面展示区 =================
 if "current_post_id" not in st.session_state:
     st.session_state.current_post_id = None
+if "liked_posts" not in st.session_state:
+    st.session_state.liked_posts = []
 
 with st.sidebar:
     st.title("🏠 稚荷")
@@ -70,7 +76,9 @@ with st.sidebar:
     else:
         for post in posts:
             display_author = post.get('author') or "匿名"
-            if st.button(f"📄 {post['title']} (by {display_author})", key=str(post['id']), use_container_width=True):
+            # 如果文章有点赞数，顺便在侧边栏标题里展示一下
+            likes_str = f" 👍{post.get('likes', 0)}" if post.get('likes', 0) > 0 else ""
+            if st.button(f"📄 {post['title']} (by {display_author}){likes_str}", key=str(post['id']), use_container_width=True):
                 st.session_state.current_post_id = str(post['id'])
                 st.rerun()
 
@@ -101,6 +109,23 @@ elif st.session_state.current_post_id is not None:
         with st.container(border=True):
             st.markdown(current_post["content"])
         
+        # ================= 点赞区域 =================
+        current_likes = current_post.get("likes") or 0
+        col_like, col_count, _ = st.columns([1.5, 3, 5])
+        
+        with col_like:
+            if post_id not in st.session_state.liked_posts:
+                if st.button("👍 点赞", type="primary", use_container_width=True):
+                    like_post(post_id, current_likes)
+                    st.session_state.liked_posts.append(post_id)
+                    st.rerun()
+            else:
+                st.button("❤️ 已赞", disabled=True, use_container_width=True)
+        with col_count:
+            st.write(f"<div style='padding-top: 8px; color: gray;'>已有 {current_likes} 人点赞</div>", unsafe_allow_html=True)
+        # ============================================
+        
+        # 文章管理面板
         with st.expander("⚙️ 管理当前文章 (修改/撤回)"):
             with st.form("edit_post_form"):
                 edit_title = st.text_input("修改标题", value=current_post["title"])
@@ -137,6 +162,7 @@ elif st.session_state.current_post_id is not None:
                         st.rerun()
             st.write("") 
         
+        # 发表新评论
         with st.expander("🗣️ 写留言 / 评论", expanded=True):
             c_author = st.text_input("你的昵称 (选填)", key="c_author", placeholder="不填则显示为匿名")
             c_content = st.text_area("留言内容", key="c_content")
@@ -151,4 +177,4 @@ elif st.session_state.current_post_id is not None:
 
 elif st.session_state.current_post_id is None:
     st.title("👋 欢迎来到稚荷")
-    st.info("这里是一个开放的树洞。你的文章和留言均已永久保存在云端，再也不会丢失。")
+    st.info("这里是一个开放的树洞。你可以随意发表文章，也可以匿名留言。点击左侧开始吧！")
