@@ -59,7 +59,7 @@ if st.session_state.current_post_id == "new":
         else:
             new_post = {
                 "id": str(int(datetime.now().timestamp())),
-                "author": author.strip() if author.strip() else "匿名",
+                "author": author.strip() if author.strip() else "匿名", # 如果没填，就赋值为匿名
                 "title": title,
                 "content": content,
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -76,36 +76,13 @@ elif st.session_state.current_post_id is not None:
     current_post = next((p for p in st.session_state.bbs_data if p["id"] == st.session_state.current_post_id), None)
     
     if current_post:
-        # 展示文章信息
         st.title(current_post["title"])
         st.caption(f"作者：{current_post['author']} | 发布于：{current_post['time']}")
         st.divider()
         
-        # 展示正文
+        # 显示正文
         with st.container(border=True):
             st.markdown(current_post["content"])
-        
-        # --- 新增：文章管理面板 ---
-        with st.expander("⚙️ 管理当前文章 (修改/撤回)"):
-            with st.form("edit_post_form"):
-                edit_title = st.text_input("修改标题", value=current_post["title"])
-                edit_content = st.text_area("修改正文", value=current_post["content"], height=150)
-                if st.form_submit_button("保存修改"):
-                    current_post["title"] = edit_title
-                    current_post["content"] = edit_content
-                    current_post["time"] = datetime.now().strftime("%Y-%m-%d %H:%M") + " (已编辑)"
-                    save_data(st.session_state.bbs_data)
-                    st.success("文章已修改！")
-                    st.rerun()
-            
-            # 删除操作放在 form 外面，防止误触
-            if st.button("🗑️ 撤回 (删除) 整篇文章", type="primary"):
-                st.session_state.bbs_data = [p for p in st.session_state.bbs_data if p["id"] != current_post["id"]]
-                save_data(st.session_state.bbs_data)
-                st.session_state.current_post_id = None
-                st.success("文章已删除！")
-                st.rerun()
-        # ------------------------
             
         st.divider()
         
@@ -113,26 +90,8 @@ elif st.session_state.current_post_id is not None:
         st.subheader(f"💬 评论 ({len(current_post['comments'])})")
         
         # 展示已有评论
-        for i, c in enumerate(current_post["comments"]):
-            col_content, col_manage = st.columns([8, 2])
-            with col_content:
-                st.markdown(f"**{c['author']}** 回复于 {c['time']}：\n> {c['content']}")
-            with col_manage:
-                # --- 新增：留言管理面板 ---
-                with st.expander("⚙️ 操作"):
-                    with st.form(key=f"edit_comment_{i}"):
-                        new_c_content = st.text_area("修改留言", value=c["content"], key=f"c_txt_{i}", height=100)
-                        if st.form_submit_button("保存修改"):
-                            c["content"] = new_c_content
-                            c["time"] = datetime.now().strftime("%Y-%m-%d %H:%M") + " (已编辑)"
-                            save_data(st.session_state.bbs_data)
-                            st.rerun()
-                    
-                    if st.button("🗑️ 撤回", key=f"del_c_{i}"):
-                        current_post["comments"].pop(i)
-                        save_data(st.session_state.bbs_data)
-                        st.rerun()
-                # ------------------------
+        for c in current_post["comments"]:
+            st.markdown(f"**{c['author']}** 回复于 {c['time']}：\n> {c['content']}")
             st.write("") 
         
         # 发表新评论
@@ -154,5 +113,5 @@ elif st.session_state.current_post_id is not None:
 
 elif st.session_state.current_post_id is None:
     # 【欢迎首页】
-    st.title("👋 欢迎来到稚荷")
+    st.title("👋 欢迎来到自由留言板")
     st.info("这里是一个开放的树洞。你可以随意发表文章，也可以匿名留言。点击左侧开始吧！")
