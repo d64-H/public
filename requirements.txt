@@ -1,4 +1,1 @@
-streamlit
 requests
-supabase
-psycopg2-binary
