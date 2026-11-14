@@ -1,11 +1,6 @@
 import streamlit as st
-import supadns  # 引入专门解决 DNS 问题的库
 from supabase import create_client, Client
 from datetime import datetime
-
-# 强制应用 DNS 补丁，绕过解析失败的问题
-supadns.patch()
-
 # ================= 配置区 =================
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
