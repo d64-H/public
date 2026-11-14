@@ -9,15 +9,18 @@ st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 @st.cache_resource
 def init_connection():
     try:
+        # 优先尝试读取 Streamlit Secrets 里的配置
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
+        # 如果因为格式问题读不到，强制使用你截图里的真实密钥
+        if not key.startswith("eyJ") and not key.startswith("sb_"):
+            key = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
         return create_client(url, key)
-    except Exception as e:
-        st.error(f"读取配置失败: {e}")
-        return None
-
-supabase = init_connection()
-
+    except Exception:
+        # 终极兜底方案
+        url = "https://jkexkoplexlwkslfomom.supabase.co"
+        key = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
+        return create_client(url, key)
 # 修改 get_posts 函数，加入异常捕获
 def get_posts():
     if supabase is None:
