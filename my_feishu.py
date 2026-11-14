@@ -5,23 +5,24 @@ from datetime import datetime
 # ================= 配置区 =================
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
-# 连接 Supabase 云端永久数据库
+# 连接 Supabase 云端永久数据库（带绝对防御）
 @st.cache_resource
 def init_connection():
     try:
-        # 优先尝试读取 Streamlit Secrets 里的配置
+        # 优先尝试从 Streamlit Secrets 读取
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
-        # 如果因为格式问题读不到，强制使用你截图里的真实密钥
-        if not key.startswith("eyJ") and not key.startswith("sb_"):
-            key = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
         return create_client(url, key)
     except Exception:
-        # 终极兜底方案
+        # 终极兜底：就算 Secrets 格式错了，也强制用下面的写死的密钥连接
         url = "https://jkexkoplexlwkslfomom.supabase.co"
         key = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKI8"
         return create_client(url, key)
-# 修改 get_posts 函数，加入异常捕获
+
+# ⚠️ 就是这句！必须有，而且必须顶格写，不能缩进！
+supabase = init_connection()
+
+# ================= 数据管理区 =================
 def get_posts():
     if supabase is None:
         return []
@@ -29,14 +30,8 @@ def get_posts():
         res = supabase.table("posts").select("*").order("id", desc=True).execute()
         return res.data
     except Exception as e:
-        # 如果连接失败，不要直接报错崩溃，而是在页面上提示
-        st.error(f"无法连接到云端数据库，错误信息：{e}")
+        st.error(f"读取文章失败，请检查数据库: {e}")
         return []
-# ================= 数据管理区 =================
-def get_posts():
-    # 从数据库按 ID 倒序拿文章
-    res = supabase.table("posts").select("*").order("id", desc=True).execute()
-    return res.data
 
 def add_post(author, title, content):
     data = {
