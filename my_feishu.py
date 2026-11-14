@@ -8,12 +8,27 @@ st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 # 连接 Supabase 云端永久数据库
 @st.cache_resource
 def init_connection():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"读取配置失败: {e}")
+        return None
 
 supabase = init_connection()
 
+# 修改 get_posts 函数，加入异常捕获
+def get_posts():
+    if supabase is None:
+        return []
+    try:
+        res = supabase.table("posts").select("*").order("id", desc=True).execute()
+        return res.data
+    except Exception as e:
+        # 如果连接失败，不要直接报错崩溃，而是在页面上提示
+        st.error(f"无法连接到云端数据库，错误信息：{e}")
+        return []
 # ================= 数据管理区 =================
 def get_posts():
     # 从数据库按 ID 倒序拿文章
