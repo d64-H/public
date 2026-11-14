@@ -1,26 +1,27 @@
 import streamlit as st
+import psycopg2
 from supabase import create_client, Client
 from datetime import datetime
 
-# ================= 配置区 =================
 st.set_page_config(page_title="稚荷", page_icon="📝", layout="wide")
 
-# 连接 Supabase 云端永久数据库
 @st.cache_resource
 def init_connection():
     try:
-        # 从 Secrets 读取
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
-        return create_client(url, key)
+        db_url = st.secrets.get("SUPABASE_DB_URL")
+        
+        # 使用 psycopg2 绕过 API 的 DNS 解析问题
+        if db_url:
+            conn = psycopg2.connect(db_url)
+            return create_client(url, key), conn
+        return create_client(url, key), None
     except Exception as e:
-        st.error(f"读取配置失败，请检查 Secrets 格式: {e}")
-        # 兜底：如果 Secrets 因为换行读不到，强行用写死的
-        url = "https://jkexkoplexlwkslfomom.supabase.co"
-        key = "sb_publishable_zy5HhmPUG005upnERSSvuA_EYbPXKIg"
-        return create_client(url, key)
+        st.error(f"连接失败: {e}")
+        return None, None
 
-supabase = init_connection()# ================= 数据管理区 =================
+supabase, db_conn = init_connection()================= 数据管理区 =================
 def get_posts():
     if supabase is None:
         return []
